@@ -1,2 +1,2 @@
-# CDG-Hackaton
-CDG Hackaton Team Eclipse 
+# GDG-Hackaton
+GDG Hackaton Team Eclipse 
