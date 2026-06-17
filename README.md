@@ -81,7 +81,16 @@ npm install
 
 ## Lancement
 
-Frontend seul avec fallback local :
+API live Partie D :
+
+```bash
+cd CDG-Hackaton
+npm start
+```
+
+L'API ecoute par defaut sur `http://localhost:8787`.
+
+Frontend avec proxy vers la Partie D :
 
 ```bash
 cd CDG-Hackaton/chronos-io
