@@ -1,0 +1,25 @@
+{
+  "scenarios": {
+    "energie-2026": {
+      "verdicts_reels": {
+        "i1": { "verdict": "fiable", "technique": null, "explication": null },
+        "i2": {
+          "verdict": "manipulateur",
+          "technique": "faux expert",
+          "explication": "Étude financée par PétroX présentée comme neutre."
+        },
+        "i3": { "verdict": "fiable", "technique": null, "explication": null },
+        "i4": {
+          "verdict": "manipulateur",
+          "technique": "chiffres trompeurs",
+          "explication": "Statistique sortie de son contexte pour exagérer l'impact."
+        }
+      },
+      "liens_reels": [
+        { "from": "i1", "to": "a1" },
+        { "from": "i2", "to": "a2" }
+      ],
+      "items": []
+    }
+  }
+}
