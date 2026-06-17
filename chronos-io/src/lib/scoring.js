@@ -18,17 +18,18 @@ function pickLabel(score) {
 // payload = { scenario_id, verdicts:[{id,verdict}], liens:[{from,to}] }
 // scenario = objet complet (contient les champs cachés pour la correction)
 export function evaluateLocally(payload, scenario) {
+  const evaluableNodes = scenario.noeuds.filter((n) => n.verdict_reel)
   const realVerdict = Object.fromEntries(
-    scenario.noeuds.map((n) => [n.id, n.verdict_reel])
+    evaluableNodes.map((n) => [n.id, n.verdict_reel])
   )
-  const byId = Object.fromEntries(scenario.noeuds.map((n) => [n.id, n]))
+  const byId = Object.fromEntries(evaluableNodes.map((n) => [n.id, n]))
 
   // --- Verdicts ---
   const tagged = payload.verdicts.filter((v) => v.verdict && v.verdict !== 'neutre')
   let verdictHits = 0
   const debrief = []
 
-  for (const node of scenario.noeuds) {
+  for (const node of evaluableNodes) {
     const given = payload.verdicts.find((v) => v.id === node.id)?.verdict ?? 'neutre'
     const real = realVerdict[node.id]
     if (given === real) {
@@ -60,7 +61,7 @@ export function evaluateLocally(payload, scenario) {
   for (const l of drawnSet) if (correctSet.has(l)) linkHits++
 
   // --- Score de manipulabilité (100 = imperméable) ---
-  const totalNodes = scenario.noeuds.length
+  const totalNodes = evaluableNodes.length
   const totalLinks = scenario.liens_corrects.length
   const verdictScore = (verdictHits / totalNodes) * 65
   const linkScore = totalLinks ? (linkHits / totalLinks) * 35 : 35

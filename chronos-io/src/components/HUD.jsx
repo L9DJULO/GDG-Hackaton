@@ -25,7 +25,7 @@ export default function HUD({
             className={`mode-btn ${mode === 'verdict' ? 'on' : ''}`}
             onClick={() => setMode('verdict')}
           >
-            <span className="glyph">◆</span> VERDICT
+            VERDICT
           </button>
           <button
             role="tab"
@@ -33,7 +33,7 @@ export default function HUD({
             className={`mode-btn ${mode === 'relier' ? 'on' : ''}`}
             onClick={() => setMode('relier')}
           >
-            <span className="glyph">⟿</span> RELIER
+            RELIER
           </button>
         </div>
         <p className="mode-hint mono">
@@ -66,7 +66,7 @@ export default function HUD({
           onClick={onSubmit}
           disabled={!canSubmit}
         >
-          SOUMETTRE LA CARTE ▸
+          SOUMETTRE LA CARTE
         </button>
       </div>
     </header>

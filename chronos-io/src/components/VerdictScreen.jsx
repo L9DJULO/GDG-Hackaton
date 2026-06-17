@@ -104,7 +104,7 @@ export default function VerdictScreen({ result, nodesById, onReopen }) {
 
         <div className="verdict-foot">
           <button className="ghost-btn mono" onClick={onReopen}>
-            ◂ ROUVRIR LE DOSSIER
+            ROUVRIR LE DOSSIER
           </button>
           <span className="verdict-stamp mono">
             CHRONOS.IO / EMI / {new Date().getFullYear()}

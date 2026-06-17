@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useEdgesState, useNodesState } from '@xyflow/react'
 import Board from './components/board/Board'
+import DetailPanel from './components/DetailPanel'
 import DMPanel from './components/DMPanel'
 import Feed from './components/Feed'
 import HUD from './components/HUD'
 import Starfield from './components/Starfield'
 import VerdictScreen from './components/VerdictScreen'
-import { LIVE_INJECTIONS, SCENARIO } from './data/scenario'
+import { LIVE_INJECTIONS } from './data/scenario'
 import { CORE_ID, CORE_POS, buildLayout, labelSideFor } from './lib/layout'
-import { evaluateLocally } from './lib/scoring'
+import { loadScenario as loadScenarioApi, sendAction, submitTruthMap } from './services/api'
 import './styles/board.css'
 
 const VERDICT_CYCLE = ['neutre', 'fiable', 'manipulateur']
@@ -48,6 +49,17 @@ function asFeedItem(node, index = 0) {
 function appendUnique(items, item) {
   if (items.some((it) => it.id === item.id)) return items
   return [item, ...items]
+}
+
+function publicNode(raw) {
+  return {
+    id: raw.id,
+    type: raw.type || 'info',
+    label: raw.label || raw.id,
+    contenu: raw.contenu || '',
+    auteur: raw.auteur,
+    dm: raw.dm,
+  }
 }
 
 function buildNodes(scenario) {
@@ -106,6 +118,7 @@ export default function App() {
   const [pulseIds, setPulseIds] = useState(new Set())
   const [glitchIds, setGlitchIds] = useState(new Set())
   const [riposteSent, setRiposteSent] = useState(false)
+  const [lastNotice, setLastNotice] = useState('')
   const [result, setResult] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const [sessionKey, setSessionKey] = useState(0)
@@ -120,7 +133,52 @@ export default function App() {
 
   const addLiveItem = useCallback(
     (raw) => {
-      const item = { ...raw, time: raw.time ?? nowStamp() }
+      const item = { ...publicNode(raw), time: raw.time ?? nowStamp() }
+      if (item.type === 'info') {
+        setScenario((current) => {
+          if (!current || current.noeuds.some((node) => node.id === item.id)) return current
+          return { ...current, noeuds: [...current.noeuds, publicNode(item)] }
+        })
+        setNodes((current) => {
+          if (current.some((node) => node.id === item.id)) return current
+          const index = current.length
+          const angle = -0.8 + index * 0.52
+          const position = {
+            x: CORE_POS.x + Math.cos(angle) * 430,
+            y: CORE_POS.y + Math.sin(angle) * 260,
+          }
+          return [
+            ...current,
+            {
+              id: item.id,
+              type: 'orb',
+              position,
+              data: {
+                node: publicNode(item),
+                verdict: 'neutre',
+                labelSide: labelSideFor(position.x),
+                mode,
+                connectArmed: false,
+              },
+            },
+          ]
+        })
+        setEdges((current) => {
+          const id = `tether-${item.id}`
+          if (current.some((edge) => edge.id === id)) return current
+          return [
+            ...current,
+            {
+              id,
+              source: CORE_ID,
+              target: item.id,
+              type: 'tether',
+              selectable: false,
+              data: { kind: 'tether', fresh: true },
+            },
+          ]
+        })
+      }
       if (item.dm) {
         setDmItems((items) => appendUnique(items, item))
         if (!dmOpen) setUnread((count) => count + 1)
@@ -128,27 +186,19 @@ export default function App() {
       }
       setFeedItems((items) => appendUnique(items, item))
     },
-    [dmOpen]
+    [dmOpen, mode, setEdges, setNodes]
   )
 
   const loadScenario = useCallback(async () => {
     setLoading(true)
     setLoadError('')
     try {
-      let nextScenario = null
-      for (const url of ['/scenario', '/scenario.json']) {
-        try {
-          const response = await fetch(url, { cache: 'no-store' })
-          if (response.ok) {
-            nextScenario = await response.json()
-            break
-          }
-        } catch {
-          // The static fallback below keeps the demo independent from Partie D.
-        }
-      }
-
-      if (!nextScenario) nextScenario = SCENARIO
+      const { scenario: nextScenario, fallback } = await loadScenarioApi()
+      setLastNotice(
+        fallback
+          ? 'Scenario charge en mode demo local. Le backend /scenario est indisponible.'
+          : 'Scenario charge depuis GET /scenario.'
+      )
 
       setScenario(nextScenario)
       setVerdicts(
@@ -188,35 +238,54 @@ export default function App() {
     return () => timers.forEach(window.clearTimeout)
   }, [addLiveItem, phase, scenario, sessionKey])
 
-  const triggerAgentReaction = useCallback(async () => {
-    if (riposteSent || !scenario) return
-    setRiposteSent(true)
+  const stateFrom = useCallback(
+    (nextVerdicts = verdicts, nextEdges = edges) => ({
+      verdicts: Object.entries(nextVerdicts).map(([id, verdict]) => ({ id, verdict })),
+      liens: nextEdges
+        .filter((edge) => edge.data?.kind === 'deduction')
+        .map((edge) => ({ from: edge.source, to: edge.target })),
+    }),
+    [edges, verdicts]
+  )
 
-    const fallback = () =>
-      addLiveItem({
-        ...LOCAL_RIPOSTE,
-        time: nowStamp(),
-      })
-
-    try {
-      const response = await fetch('/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scenario_id: scenario.scenario_id,
-          action: { type: 'verdict', id: 'a1', verdict: 'manipulateur' },
-        }),
-      })
-      if (!response.ok) throw new Error('Partie C absente')
-      const items = await response.json()
+  const applyAgentResponse = useCallback(
+    (items, fallback, message) => {
       if (Array.isArray(items) && items.length) {
         items.forEach(addLiveItem)
-      } else {
-        fallback()
+        setLastNotice(message || 'Reaction agentique ajoutee au fil.')
+        return
       }
-    } catch {
-      fallback()
-    }
+      if (fallback) {
+        setLastNotice('Reaction agentique indisponible. Mode demo local actif.')
+      }
+    },
+    [addLiveItem]
+  )
+
+  const triggerAgentReaction = useCallback(async (action, state) => {
+    if (!scenario) return
+    const response = await sendAction({
+      scenarioId: scenario.scenario_id,
+      action,
+      state,
+    })
+    applyAgentResponse(response.items, response.fallback)
+    return response
+  }, [applyAgentResponse, scenario])
+
+  const triggerGourouFallback = useCallback(() => {
+    if (riposteSent || !scenario) return
+    setRiposteSent(true)
+    addLiveItem({ ...LOCAL_RIPOSTE, time: nowStamp() })
+    setGlitchIds((state) => new Set(state).add('a1'))
+    window.setTimeout(() => {
+      setGlitchIds((state) => {
+        const copy = new Set(state)
+        copy.delete('a1')
+        return copy
+      })
+    }, 900)
+    setLastNotice('Le Gourou change de tactique dans le fil.')
   }, [addLiveItem, riposteSent, scenario])
 
   const handleNodeActivate = useCallback(
@@ -227,7 +296,8 @@ export default function App() {
       if (mode === 'verdict') {
         const current = verdicts[id] ?? 'neutre'
         const next = nextVerdict(current)
-        setVerdicts((state) => ({ ...state, [id]: next }))
+        const nextVerdicts = { ...verdicts, [id]: next }
+        setVerdicts(nextVerdicts)
 
         if (next === 'manipulateur') {
           setGlitchIds((state) => new Set(state).add(id))
@@ -240,9 +310,13 @@ export default function App() {
           }, 650)
         }
 
-        if (id === 'a1' && next === 'manipulateur') {
-          triggerAgentReaction()
-        }
+        const action = { type: 'tag', id, verdict: next }
+        const state = stateFrom(nextVerdicts, edges)
+        triggerAgentReaction(action, state).then((response) => {
+          if (id === 'a1' && next === 'manipulateur' && (!response || response.fallback || response.items.length === 0)) {
+            triggerGourouFallback()
+          }
+        })
         return
       }
 
@@ -252,9 +326,10 @@ export default function App() {
 
         const [a, b] = [current, id].sort()
         const edgeId = `deduction-${a}-${b}`
+        let nextEdges = edges
         setEdges((items) => {
           if (items.some((edge) => edge.id === edgeId)) return items
-          return [
+          nextEdges = [
             ...items,
             {
               id: edgeId,
@@ -264,14 +339,68 @@ export default function App() {
               data: { kind: 'deduction', fresh: true, deletable: true },
             },
           ]
+          return nextEdges
         })
 
         setPulseIds(new Set([current, id]))
         window.setTimeout(() => setPulseIds(new Set()), 760)
+        const action = { type: 'link', from: current, to: id }
+        const state = stateFrom(verdicts, nextEdges)
+        triggerAgentReaction(action, state).then((response) => {
+          if (
+            [current, id].includes('a1') &&
+            (!response || response.fallback || response.items.length === 0)
+          ) {
+            triggerGourouFallback()
+          }
+        })
         return null
       })
     },
-    [mode, nodesById, scenario, setEdges, triggerAgentReaction, verdicts]
+    [edges, mode, nodesById, scenario, setEdges, stateFrom, triggerAgentReaction, triggerGourouFallback, verdicts]
+  )
+
+  const setNodeVerdict = useCallback(
+    (id, verdict) => {
+      if (!scenario || !nodesById[id]) return
+      setFocusedId(id)
+      const nextVerdicts = { ...verdicts, [id]: verdict }
+      setVerdicts(nextVerdicts)
+      const action = { type: 'tag', id, verdict }
+      const state = stateFrom(nextVerdicts, edges)
+      triggerAgentReaction(action, state).then((response) => {
+        if (id === 'a1' && verdict === 'manipulateur' && (!response || response.fallback || response.items.length === 0)) {
+          triggerGourouFallback()
+        }
+      })
+    },
+    [edges, nodesById, scenario, stateFrom, triggerAgentReaction, triggerGourouFallback, verdicts]
+  )
+
+  const createDeductionLink = useCallback(
+    (from, to) => {
+      if (!scenario || !nodesById[from] || !nodesById[to] || from === to) return
+      const [a, b] = [from, to].sort()
+      const edgeId = `deduction-${a}-${b}`
+      if (edges.some((edge) => edge.id === edgeId)) return
+      const edge = {
+        id: edgeId,
+        source: from,
+        target: to,
+        type: 'deduction',
+        data: { kind: 'deduction', fresh: true, deletable: mode === 'relier' },
+      }
+      const nextEdges = [...edges, edge]
+      setEdges(nextEdges)
+      setPulseIds(new Set([from, to]))
+      window.setTimeout(() => setPulseIds(new Set()), 760)
+      triggerAgentReaction({ type: 'link', from, to }, stateFrom(verdicts, nextEdges)).then((response) => {
+        if ([from, to].includes('a1') && (!response || response.fallback || response.items.length === 0)) {
+          triggerGourouFallback()
+        }
+      })
+    },
+    [edges, mode, nodesById, scenario, setEdges, stateFrom, triggerAgentReaction, triggerGourouFallback, verdicts]
   )
 
   useEffect(() => {
@@ -340,23 +469,33 @@ export default function App() {
     }
   }, [edges, scenario, verdicts])
 
+  const deductionLinks = useMemo(
+    () =>
+      edges
+        .filter((edge) => edge.data?.kind === 'deduction')
+        .map((edge) => ({ from: edge.source, to: edge.target })),
+    [edges]
+  )
+
+  const focusedNode = focusedId ? nodesById[focusedId] : null
+  const actors = useMemo(
+    () => (scenario ? scenario.noeuds.filter((node) => node.type === 'actor') : []),
+    [scenario]
+  )
+
   const submit = useCallback(async () => {
     if (!scenario || !payload || submitting) return
     setSubmitting(true)
     try {
-      let nextResult = null
-      try {
-        const response = await fetch('/submit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (response.ok) nextResult = await response.json()
-      } catch {
-        // Fallback local below.
+      if (!payload.verdicts.some((item) => item.verdict !== 'neutre')) {
+        setLastNotice('Ajoutez au moins un verdict avant la soumission.')
       }
-      if (!nextResult) nextResult = evaluateLocally(payload, scenario)
+      if (payload.liens.length === 0) {
+        setLastNotice('Aucun lien cree. La soumission reste possible pour la demo.')
+      }
+      const { result: nextResult, fallback } = await submitTruthMap(payload, scenario)
       setResult(nextResult)
+      if (fallback) setLastNotice('Evaluation locale utilisee car POST /submit est indisponible.')
       setPhase('result')
     } finally {
       setSubmitting(false)
@@ -418,6 +557,15 @@ export default function App() {
                 onEdgeDelete={deleteEdge}
               />
             </section>
+            <DetailPanel
+              node={focusedNode}
+              actors={actors}
+              verdict={focusedId ? verdicts[focusedId] ?? 'neutre' : 'neutre'}
+              links={deductionLinks}
+              lastNotice={lastNotice}
+              onVerdict={setNodeVerdict}
+              onLink={createDeductionLink}
+            />
           </main>
 
           <DMPanel

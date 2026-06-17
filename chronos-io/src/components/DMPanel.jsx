@@ -9,10 +9,9 @@ export default function DMPanel({ items, open, setOpen, unread }) {
         aria-expanded={open}
         aria-label="Canal chiffre du lanceur d'alerte"
       >
-        <span className="dm-lock">⌁</span>
         CANAL CHIFFRE
         {unread > 0 && !open && <span className="dm-badge">{unread}</span>}
-        <span className="dm-caret">{open ? '▸' : '◂'}</span>
+        <span className="dm-caret">{open ? 'FERMER' : 'OUVRIR'}</span>
       </button>
 
       <AnimatePresence>
